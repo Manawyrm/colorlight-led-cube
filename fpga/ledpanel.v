@@ -14,11 +14,12 @@
 module ledpanel (
 	input wire [7:0] panel_index,			// static panel index, index of panel on ctrl_en bus, starts at 1
 
+	input wire ctrl_clock,				// clock driving ctrl bus
 	input wire [7:0]			ctrl_en,	// index of panel to write to + 1, 0 selects no panel at all
 	input wire [15:0]			ctrl_addr,	// addr to write color info on [col_info][row_info]
 	input wire [INPUT_DEPTH-1:0]	ctrl_wdat,	// RGB565 datum to be written
 
-	input wire display_clock,				// clock driving both the display itself and and ctrl bus
+	input wire display_clock,				// clock driving the display itself
 
 	/* standard HUB75 data lines */
 	output reg panel_r0, panel_g0, panel_b0, panel_r1, panel_g1, panel_b1,
@@ -75,7 +76,7 @@ module ledpanel (
 		$readmemh("no_signal.rgb1",video_mem_rgb1);
 	end
 
-	always @(posedge display_clock) begin
+	always @(posedge ctrl_clock) begin
 		if (ctrl_en == panel_index) begin
 			if (ctrl_addr[15:BITS_WIDTH] >= RGB1_OFFSET) begin
 				video_mem_rgb1[ctrl_addr - (RGB1_OFFSET * WIDTH)] <= ctrl_wdat;
@@ -94,6 +95,14 @@ module ledpanel (
 	reg [BITS_COLOR_DEPTH - 1:0]				addr_z;
 	reg [5:0]									data_rgb; // R0, G0, B0, R1, G1, G2 -> 6 bits
 
+
+	reg	[BITS_GREEN : 0] data_rgb0;
+	reg	[BITS_GREEN : 0] data_rgb1;
+	reg	[BITS_GREEN : 0] data_rgb2;
+	reg	[BITS_GREEN : 0] data_rgb3;
+	reg	[BITS_GREEN : 0] data_rgb4;
+	reg	[BITS_GREEN : 0] data_rgb5;
+
 	reg clkdiv = 0;
 	reg state = 0;
 
@@ -101,9 +110,9 @@ module ledpanel (
 	 * HUB75 are slooooooooow
 	 * Divide our primary clock by 2 so we get stable output
 	 */
-	always @(posedge display_clock) begin
-		clkdiv = !clkdiv;
-	end
+	//always @(posedge display_clock) begin
+	//	clkdiv = !clkdiv;
+	//end
 
 	/*
 	 * Binary operation state.
@@ -111,9 +120,7 @@ module ledpanel (
 	 * On odd cycles we calculate new addresses and emit rising clock edge
 	 */
 	always @(posedge display_clock) begin
-		if (clkdiv) begin
 			state = !state;
-		end
 	end
 
 	/*
@@ -123,7 +130,6 @@ module ledpanel (
 	 * cnt_y is the index of rgb0 and rgb1 line we are displaying right now
 	 */
 	always @(posedge display_clock) begin
-		if (clkdiv) begin
 			if (state) begin
 				if (cnt_x == (WIDTH << cnt_z) + 8) begin
 					cnt_x = 0;
@@ -137,8 +143,12 @@ module ledpanel (
 					cnt_x = cnt_x + 1;
 				end
 			end
-		end
 	end
+	/*always @(posedge display_clock) begin
+		cnt_x = cnt_x + 1;
+		cnt_y = cnt_y + 1;
+		cnt_z = cnt_z + 1;
+	end*/
 
 	/*
 	 * From here on we stop caring about clkdiv since all input values used are
@@ -195,16 +205,25 @@ module ledpanel (
 	 */
 	reg [BITS_WIDTH + COLOR_DEPTH + 3 - 1:0] cnt_x_latched;
 	always @(posedge display_clock) begin
-		addr_x = cnt_x[BITS_WIDTH - 1:0];
+		addr_x = cnt_x[BITS_WIDTH:0] - 1;
 		addr_y = cnt_y[BITS_HEIGHT - 1:0];
 		addr_z = cnt_z;
 		cnt_x_latched = cnt_x;
+	end
+
+	wire [INPUT_DEPTH-1:0] rgb0;
+	wire [INPUT_DEPTH-1:0] rgb1;
+
+	always @(posedge display_clock) begin
+		rgb0 <= video_mem_rgb0[{addr_y, addr_x}];
+		rgb1 <= video_mem_rgb1[{addr_y, addr_x}];
 	end
 
 	/*
 	 * Relative display cycle one. Latch rgb line data from BRAM.
 	 */
 	always @(posedge display_clock) begin
+		/*
 		// Red - 4:0
 		data_rgb[0] = gamma_mem_red[video_mem_rgb0[{addr_y, addr_x}][BITS_RED-1:0]][addr_z];
 		data_rgb[1] = gamma_mem_red[video_mem_rgb1[{addr_y, addr_x}][BITS_RED-1:0]][addr_z];
@@ -214,6 +233,29 @@ module ledpanel (
 		// Blue - 15:11
 		data_rgb[4] = gamma_mem_blue[video_mem_rgb0[{addr_y, addr_x}][BITS_GREEN + BITS_RED + BITS_BLUE-1:BITS_GREEN + BITS_RED]][addr_z];
 		data_rgb[5] = gamma_mem_blue[video_mem_rgb1[{addr_y, addr_x}][BITS_GREEN + BITS_RED + BITS_BLUE-1:BITS_GREEN + BITS_RED]][addr_z];
+		*/
+
+
+		/*
+		// Red - 4:0
+		data_rgb[0] = gamma_mem_red[rgb0[BITS_RED-1:0]][addr_z];
+		data_rgb[1] = gamma_mem_red[rgb1[BITS_RED-1:0]][addr_z];
+		// Green - 10:5
+		data_rgb[2] = gamma_mem_green[rgb0[BITS_GREEN + BITS_RED-1:BITS_RED]][addr_z];
+		data_rgb[3] = gamma_mem_green[rgb1[BITS_GREEN + BITS_RED-1:BITS_RED]][addr_z];
+		// Blue - 15:11
+		data_rgb[4] = gamma_mem_blue[rgb0[BITS_GREEN + BITS_RED + BITS_BLUE-1:BITS_GREEN + BITS_RED]][addr_z];
+		data_rgb[5] = gamma_mem_blue[rgb1[BITS_GREEN + BITS_RED + BITS_BLUE-1:BITS_GREEN + BITS_RED]][addr_z];
+		*/
+		// Red - 4:0
+		data_rgb0 = rgb0[BITS_RED-1:0];
+		data_rgb1 = rgb1[BITS_RED-1:0];
+		// Green - 10:5
+		data_rgb2 = rgb0[BITS_GREEN + BITS_RED-1:BITS_RED];
+		data_rgb3 = rgb1[BITS_GREEN + BITS_RED-1:BITS_RED];
+		// Blue - 15:11
+		data_rgb4 = rgb0[BITS_GREEN + BITS_RED + BITS_BLUE-1:BITS_GREEN + BITS_RED];
+		data_rgb5 = rgb1[BITS_GREEN + BITS_RED + BITS_BLUE-1:BITS_GREEN + BITS_RED];
 	end
 
 	/*
@@ -225,14 +267,22 @@ module ledpanel (
 	 */
 	always @(posedge display_clock) begin
 		if (!state) begin
-			if (cnt_x_latched > 0 && cnt_x_latched <= WIDTH) begin
-				{panel_r1, panel_r0} = {data_rgb[1], data_rgb[0]};
-				{panel_g1, panel_g0} = {data_rgb[3], data_rgb[2]};
-				{panel_b1, panel_b0} = {data_rgb[5], data_rgb[4]};
+			if (cnt_x_latched > 0 && cnt_x_latched <= WIDTH + 1) begin
+				panel_r1 = data_rgb1[addr_z];
+				panel_r0 = data_rgb0[addr_z];
+
+				panel_g1 = data_rgb3[addr_z];
+				panel_g0 = data_rgb2[addr_z];
+
+				panel_b1 = data_rgb5[addr_z];
+				panel_b0 = data_rgb4[addr_z];
 			end else begin
-				{panel_r1, panel_r0} = 0;
-				{panel_g1, panel_g0} = 0;
-				{panel_b1, panel_b0} = 0;
+				panel_r1 = 0;
+				panel_r0 = 0;
+				panel_g1 = 0;
+				panel_g0 = 0;
+				panel_b1 = 0;
+				panel_b0 = 0;
 			end
 		end
 	end

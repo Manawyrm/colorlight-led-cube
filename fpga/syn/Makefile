@@ -10,7 +10,7 @@ YOSYS_SCRIPT:=syn.ys
 all : top.svf
 
 ../pll.v :
-	ecppll -i 25 --clkout0_name clock --clkout0 125 --clkout1_name panel_clock --clkout1 125 -f ../pll.v
+	ecppll -i 25 --clkout0_name clock --clkout0 125 --clkout1_name panel_clock --clkout1 65 -f ../pll.v
 
 ../liteeth_core.v : ../liteeth.yml
 	liteeth_gen --gateware-dir ../ --no-compile-software ../liteeth.yml
